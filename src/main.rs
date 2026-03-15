@@ -10,6 +10,11 @@ struct State {
 impl GameState for State {
     fn tick(&mut self, ctx: &mut BTerm) {
         ctx.cls();
+
+        if self.app.is_ai_turn() && !self.app.is_game_over() {
+            self.app.advance_turn(); // AI acts immediately
+        }
+
         self.draw_ui(ctx);
 
         if let Some(key) = ctx.key {
@@ -75,7 +80,11 @@ impl State {
         let hand = self.app.get_hand();
         for (i, card) in hand.iter().enumerate() {
             let y = 21 + i as i32;
-            ctx.print(6, y, format!("{}) {} — {}", i + 1, card.name, card.description));
+            ctx.print(
+                6,
+                y,
+                format!("{}) {} — {}", i + 1, card.name, card.description),
+            );
         }
 
         ctx.print_color(
@@ -88,15 +97,39 @@ impl State {
     }
 
     fn handle_input(&mut self, key: VirtualKeyCode) {
-        match key {
-            VirtualKeyCode::Key1 => self.app.play_card(0),
-            VirtualKeyCode::Key2 => self.app.play_card(1),
-            VirtualKeyCode::Key3 => self.app.play_card(2),
-            VirtualKeyCode::Key4 => self.app.play_card(3),
-            VirtualKeyCode::Key5 => self.app.play_card(4),
-            VirtualKeyCode::R => self.app = App::new(),
-            VirtualKeyCode::Q => std::process::exit(0),
-            _ => {}
+        if self.app.is_game_over() {
+            match key {
+                VirtualKeyCode::R => self.app = App::new(),
+                VirtualKeyCode::Q => std::process::exit(0),
+                _ => {}
+            }
+            return;
+        }
+
+        if !self.app.is_player_turn() {
+            // Ignore input during AI turn (or future phases)
+            return;
+        }
+
+        let index = match key {
+            VirtualKeyCode::Key1 => Some(0),
+            VirtualKeyCode::Key2 => Some(1),
+            VirtualKeyCode::Key3 => Some(2),
+            VirtualKeyCode::Key4 => Some(3),
+            VirtualKeyCode::Key5 => Some(4),
+            _ => None,
+        };
+
+        if let Some(idx) = index {
+            self.app.play_card(idx);
+            // No need for self.app.advance_turn() here anymore —
+            // advance_turn is now called in tick when phase changes
+        } else {
+            match key {
+                VirtualKeyCode::R => self.app = App::new(),
+                VirtualKeyCode::Q => std::process::exit(0),
+                _ => {}
+            }
         }
     }
 }
