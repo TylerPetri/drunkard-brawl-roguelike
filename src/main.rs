@@ -11,8 +11,9 @@ impl GameState for State {
     fn tick(&mut self, ctx: &mut BTerm) {
         ctx.cls();
 
+        // Auto-advance AI turn when it's their phase
         if self.app.is_ai_turn() && !self.app.is_game_over() {
-            self.app.advance_turn(); // AI acts immediately
+            self.app.advance_turn();
         }
 
         self.draw_ui(ctx);
@@ -25,7 +26,7 @@ impl GameState for State {
 
 impl State {
     fn draw_ui(&self, ctx: &mut BTerm) {
-        // Title - centered, yellow fg, black bg
+        // Title
         ctx.print_color_centered(
             1,
             RGB::named(YELLOW),
@@ -33,7 +34,7 @@ impl State {
             "=== DRUNKARD BRAWL 🍺🥴 ===",
         );
 
-        // HP lines - note: format! returns String, but print_color accepts &str via &
+        // HP display
         ctx.print_color(
             5,
             4,
@@ -49,7 +50,27 @@ impl State {
             &format!("OPPONENT  : {}", self.app.opponent_hp()),
         );
 
-        // Message
+        // Phase / state indicator
+        let phase_text = if self.app.is_game_over() {
+            "GAME OVER"
+        } else if self.app.is_player_turn() {
+            "YOUR TURN – choose a beer!"
+        } else if self.app.is_ai_turn() {
+            "Opponent is chugging..."
+        } else if self.app.is_mixer_phase() {
+            "MIXER EVENT! Pick your chaser (1-3)"
+        } else {
+            "???"
+        };
+
+        ctx.print_color_centered(
+            8,
+            RGB::named(LIGHT_GREEN),
+            RGB::named(BLACK),
+            phase_text,
+        );
+
+        // Main message
         ctx.print_color_centered(
             10,
             RGB::named(LIGHT_BLUE),
@@ -62,74 +83,108 @@ impl State {
                 14,
                 RGB::named(RED),
                 RGB::named(BLACK),
-                "GAME OVER — you blacked out or they did!",
+                "YOU BLACKED OUT – or they did!  (R = restart)",
             );
-            return;
         }
 
-        // Box around hand choices
+        // Action area (hand or mixer choices)
         ctx.draw_box(3, 16, 74, 13, RGB::named(WHITE), RGB::named(BLACK));
 
-        ctx.print_color_centered(
-            18,
-            RGB::named(ORANGE),
-            RGB::named(BLACK),
-            "CHOOSE YOUR BEER (press 1-5)",
-        );
-
-        let hand = self.app.get_hand();
-        for (i, card) in hand.iter().enumerate() {
-            let y = 21 + i as i32;
-            ctx.print(
-                6,
-                y,
-                format!("{}) {} — {}", i + 1, card.name, card.description),
+        if self.app.is_game_over() {
+            // nothing extra
+        } else if self.app.is_mixer_phase() {
+            ctx.print_color_centered(
+                18,
+                RGB::named(PINK),
+                RGB::named(BLACK),
+                "Choose your mixer / chaser...",
             );
+
+            let mixer_options = [
+                "1) Red Bull chaser — next card +50% dmg to them, but +2 self dmg",
+                "2) Fireball shot — instant +10 to them, but skip your next turn",
+                "3) Greasy pizza — +15 HP to you, +5 HP to them",
+            ];
+
+            for (i, line) in mixer_options.iter().enumerate() {
+                let y = 21 + i as i32;
+                ctx.print(6, y, format!("{}) {}", i + 1, line));
+            }
+        } else if self.app.is_player_turn() {
+            ctx.print_color_centered(
+                18,
+                RGB::named(ORANGE),
+                RGB::named(BLACK),
+                "CHOOSE YOUR BEER (press 1-5)",
+            );
+
+            let hand = self.app.get_hand();
+            for (i, card) in hand.iter().enumerate() {
+                let y = 21 + i as i32;
+                ctx.print(
+                    6,
+                    y,
+                    format!("{}) {} — {}", i + 1, card.name, card.description),
+                );
+            }
         }
 
+        // Footer controls
         ctx.print_color(
             6,
             29,
             RGB::named(GRAY),
             RGB::named(BLACK),
-            "Q = Quit  |  R = Restart",
+            "Q = Quit    R = Restart",
         );
     }
 
     fn handle_input(&mut self, key: VirtualKeyCode) {
         if self.app.is_game_over() {
             match key {
-                VirtualKeyCode::R => self.app = App::new(),
+                VirtualKeyCode::R => self.app.reset(),
                 VirtualKeyCode::Q => std::process::exit(0),
                 _ => {}
             }
             return;
         }
 
-        if !self.app.is_player_turn() {
-            // Ignore input during AI turn (or future phases)
+        // Mixer phase has priority
+        if self.app.is_mixer_phase() {
+            let choice = match key {
+                VirtualKeyCode::Key1 => Some(0usize),
+                VirtualKeyCode::Key2 => Some(1),
+                VirtualKeyCode::Key3 => Some(2),
+                _ => None,
+            };
+
+            if let Some(idx) = choice {
+                self.app.choose_mixer(idx);
+            }
             return;
         }
 
-        let index = match key {
-            VirtualKeyCode::Key1 => Some(0),
-            VirtualKeyCode::Key2 => Some(1),
-            VirtualKeyCode::Key3 => Some(2),
-            VirtualKeyCode::Key4 => Some(3),
-            VirtualKeyCode::Key5 => Some(4),
-            _ => None,
-        };
+        // Normal player turn – card selection
+        if self.app.is_player_turn() {
+            let card_idx = match key {
+                VirtualKeyCode::Key1 => Some(0usize),
+                VirtualKeyCode::Key2 => Some(1),
+                VirtualKeyCode::Key3 => Some(2),
+                VirtualKeyCode::Key4 => Some(3),
+                VirtualKeyCode::Key5 => Some(4),
+                _ => None,
+            };
 
-        if let Some(idx) = index {
-            self.app.play_card(idx);
-            // No need for self.app.advance_turn() here anymore —
-            // advance_turn is now called in tick when phase changes
-        } else {
-            match key {
-                VirtualKeyCode::R => self.app = App::new(),
-                VirtualKeyCode::Q => std::process::exit(0),
-                _ => {}
+            if let Some(idx) = card_idx {
+                self.app.play_card(idx);
             }
+        }
+
+        // Global shortcuts
+        match key {
+            VirtualKeyCode::R => self.app.reset(),
+            VirtualKeyCode::Q => std::process::exit(0),
+            _ => {}
         }
     }
 }
