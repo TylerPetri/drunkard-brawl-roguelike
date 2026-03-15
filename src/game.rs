@@ -26,6 +26,12 @@ pub struct Card {
     pub damage_to_opponent: i32,
 }
 
+#[derive(PartialEq, Eq)]
+pub enum Winner {
+    Player,
+    Opponent,
+}
+
 pub struct App {
     player_hp: i32,
     opponent_hp: i32,
@@ -149,14 +155,12 @@ impl App {
         self.reshuffle_if_needed();
 
         let mut drawn = Vec::new();
-
         while drawn.len() < HAND_SIZE && !self.deck.is_empty() {
             if let Some(card) = self.deck.pop() {
                 drawn.push(card);
             }
         }
-
-        self.hand.extend(drawn);
+        self.hand = drawn; // Replace entire hand (fixes bloat)
     }
 
     fn reshuffle_if_needed(&mut self) {
@@ -177,7 +181,23 @@ impl App {
         &self.message
     }
     pub fn is_game_over(&self) -> bool {
-        self.player_hp <= 0 || self.opponent_hp <= 0
+        let over = self.player_hp <= 0 || self.opponent_hp <= 0;
+        if over {
+            debug_assert!(
+                self.winner().is_some(),
+                "Game over but winner() returned None"
+            );
+        }
+        over
+    }
+    pub fn winner(&self) -> Option<Winner> {
+        if self.player_hp <= 0 {
+            Some(Winner::Opponent)
+        } else if self.opponent_hp <= 0 {
+            Some(Winner::Player)
+        } else {
+            None
+        }
     }
     pub fn is_player_turn(&self) -> bool {
         self.phase == GamePhase::PlayerTurn
@@ -211,12 +231,14 @@ impl App {
         self.player_hp -= self_dmg;
         self.opponent_hp -= opp_dmg;
 
-        self.discard.push(card.clone());
+        self.discard.push(card);
 
         self.message = format!(
             "You crushed a {}! ({} to you, {} to them)",
-            card.name, self_dmg, opp_dmg
-        );
+            self.discard.last().unwrap().name,
+            self_dmg,
+            opp_dmg
+        ); // Use discard for ref (no clone)
 
         self.phase = GamePhase::AiTurn;
     }
@@ -237,7 +259,7 @@ impl App {
                     .push_str(&format!("  AI chugged {}!", card.name));
             }
 
-            self.draw_hand();
+            self.hand.clear(); // Clear hand after AI (prevents bloat)
             self.phase = GamePhase::MixerDecision;
             self.message = "Mixer Event! Choose your chaser (1-3):".to_string();
         }
